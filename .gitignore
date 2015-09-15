@@ -1,0 +1,12 @@
+*.pyc
+*.sqlite
+*.sqlite-journal
+
+config.py
+
+.idea
+.ipynb_checkpoints
+submodules
+images/*
+
+!images/readme.md

@@ -1,0 +1,7 @@
+# Configuration
+AWS_ACCESS_KEY_ID = ''
+AWS_SECRET_ACCESS_KEY = ''
+AWS_ASSOCIATE_TAG = ''
+UPC_DB_KEY = ''
+CATALOG_DB = 'catalog.sqlite'
+IMAGES_PATH = 'images'

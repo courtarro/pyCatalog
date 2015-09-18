@@ -1,169 +1,145 @@
 #!/usr/bin/env python
 
-import bottlenose
-import sqlite3
+import jsonrpc
+import sqlalchemy as sa
+import sqlalchemy.orm as orm
 import sys
+import threading
+import time
+import tornado.ioloop
+import tornado.web
 import urllib2
 import uuid
 
-# Local imports
-import xml_fix
+# --- Local imports ---
+
+from amazon import Amazon
 from config import *
-from constants import *
+from model import *
 
-# Amazon Searches
-amazon = bottlenose.Amazon(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ASSOCIATE_TAG)
+# --- Constants ---
 
+LISTEN_PORT = 8000
 
-def amazon_search(keywords):
-    # Perform Query by UPC or Other String
-    # This process will search for items on Amazon using a set of keywords or a UPC
-    
-    # sample keyword (upc): '851147006055'
-    response = amazon.ItemSearch(Keywords=keywords, SearchIndex='All')
-    res_x = xml_fix.fromstring(response)
-    success = res_x.find('Items/Request/IsValid').text == 'True'
-    if success:
-        item_x = res_x.find('Items')
-        return item_x.findall('Item')
-    else:
-        return None
+# --- Globals ---
+
+dispatcher = jsonrpc.Dispatcher()
 
 
-def amazon_lookup(asin):
-    # Perform Query by ASIN (assumes only one matching item)
+# --- Methods ---
 
-    # sample ASIN: 'B00LOWJ6JY'
-    response = amazon.ItemLookup(ItemId=asin)
-    res_x = xml_fix.fromstring(response)
-    success = res_x.find('Items/Request/IsValid').text == 'True'
-    if success:
-        item_x = res_x.find('Items/Item')
-        return item_x
-    else:
-        return None
-
-
-def amazon_to_item(item_x, upc=None):
-    # Convert from Amazon Item to Media Item
-    
-    asin = item_x.find('ASIN').text
-    item_attr = item_x.find('ItemAttributes')
-    group = item_attr.find('ProductGroup').text
-
-    new_item = {}
-    new_item['external_ids'] = {}
-    new_item['external_ids'][ExternalIdProvider.Amazon] = asin
-    if upc is not None:
-        new_item['external_ids'][ExternalIdProvider.UPC] = upc
-        
-    if group == 'DVD':
-        new_item['type'] = MediaType.Movie
-        new_item['title'] = item_attr.find('Title').text
-        new_item['director'] = item_attr.find('Director').text
-        new_item['actor'] = item_attr.find('Actor').text
-        new_item['publisher'] = item_attr.find('Manufacturer').text
-    elif group == 'Music':
-        new_item['type'] = MediaType.Music
-        new_item['title'] = item_attr.find('Title').text
-        new_item['artist'] = item_attr.find('Artist').text
-        new_item['label'] = item_attr.find('Manufacturer').text
-    else:
-        print 'Unknown product group: ' + group
-
-    return asin, new_item
-
-
-def amazon_fetch_image(imageset_x):
-    # Fetch Images from Amazon
-    if imageset_x is None:
-        return None
-
-    max_size = max_img = None
-    
-    for img_x in imageset_x:
-        width = int(img_x.find('Width').text)
-        height = int(img_x.find('Height').text)
-        size = width * height
-        if (max_size is None) or (size > max_size):
-            max_size = size
-            max_img = img_x.find('URL').text
-            
-    if max_img is None:
-        return None
-    
-    image = urllib2.urlopen(max_img).read()
+def fetch_image(image_url):
+    image = urllib2.urlopen(image_url).read()
     new_filename = str(uuid.uuid4()) + '.jpg'
     with open(IMAGES_PATH + "/" + new_filename, 'wb') as image_file:
         image_file.write(image)
-        
+
     return new_filename
 
 
-def amazon_fetch_images(asin):
-    response = amazon.ItemLookup(ItemId=asin, ResponseGroup='Images')
-    res_x = xml_fix.fromstring(response)
-    success = res_x.find('Items/Request/IsValid').text == 'True'
-    if success:
-        covers = {}
-        image_x = res_x.find('Items/Item/ImageSets')
-        if len(image_x):
-            front_filename = fetch_image(image_x.find("ImageSet[@Category='primary']"))
-            if front_filename is not None:
-                covers[CoverType.Front] = front_filename
-            back_filename = fetch_image(image_x.find("ImageSet[@Category='variant']"))
-            if back_filename is not None:
-                covers[CoverType.Back] = back_filename
-        return covers
-    else:
-        return None
-
-
 def write_new_item(new_item):
-    # Write New Item to Database
-    con = sqlite3.connect(CATALOG_DB)
-    cur = con.cursor()
+    engine = sa.create_engine('sqlite:///' + CATALOG_DB, echo=True)
+    Base.metadata.bind = engine
+    session_spec = orm.sessionmaker()
+    session_spec.bind = engine
+    sess = session_spec()
 
-    # Main item ID
-    cur.execute('insert into item default values;')
-    item_id = cur.lastrowid
+    sess.add(new_item)
+    sess.commit()
 
-    # External IDs
-    for provider, eid in new_item['external_ids'].iteritems():
-        params = (item_id, provider, eid)
-        cur.execute('insert into external_id (item_id, provider, external_id) values (?,?,?)', params)
-        
-    # Extra details
-    if new_item['type'] == MediaType.Movie:
-        params = (item_id, new_item['title'], new_item['actor'], new_item['director'], new_item['publisher'])
-        cur.execute('insert into movie (item_id, title, actor, director, publisher) values (?,?,?,?,?)', params)
-    elif new_item['type'] == MediaType.Music:
-        params = (item_id, new_item['title'], new_item['artist'], new_item['label'])
-        cur.execute('insert into music (item_id, title, artist, label) values (?,?,?,?)', params)
-        
-    # Images
-    for image_type, filename in new_item['covers'].iteritems():
-        params = (item_id, image_type, filename)
-        cur.execute('insert into image (item_id, type, filename) values (?,?,?)', params)
-
-    con.commit()
-    con.close()
-    
-    return item_id
+    return
 
 
 def test_amazon_query():
+    amazon = Amazon()
+
     upc = '851147006055'
-    items_a = amazon_search(upc)
+    items_a = amazon.search(upc)
     if (items_a is None) or (not len(items_a)):
         sys.exit("No item with that UPC")
     item_a = items_a[0]
-    asin, item = amazon_to_item(item_a, upc)
-    covers = fetch_images(asin)
-    if (covers is not None) and len(covers):
-        item['covers'] = covers
+    asin, item = amazon.to_item(item_a, upc)
+    covers_a = amazon.get_imagesets(asin)
+    if (covers_a is not None) and len(covers_a):
+        for img_type, cover_a in covers_a.iteritems():
+            url = amazon.get_best_image_url(cover_a)
+            filename = fetch_image(url)
+            if filename:
+                img = Image(type=img_type, filename=filename)
+                item.images.append(img)
+
     write_new_item(item)
 
 
+def rpc_execute(request):
+    response = jsonrpc.JSONRPCResponseManager.handle(request, dispatcher)
+    return response.json
+
+
+# --- JSON RPC methods ---
+
+
+@dispatcher.add_method
+def foobar(**kwargs):
+    return kwargs["foo"] + kwargs["bar"]
+
+
+# --- Web server stuff ---
+
+
+class FancyStaticFileHandler(tornado.web.StaticFileHandler):
+    def set_default_headers(self):
+        # Allow other domains, prevent any caching
+        self.set_header('Access-Control-Allow-Origin', '*')
+        self.set_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+
+
+class RPCHandler(tornado.web.RequestHandler):
+    def post(self):
+        self.set_header('Content-Type', 'application/json')
+        self.write(rpc_execute(self.request.body))
+
+
+class WebServer():
+    def __init__(self, port_number, www_root):
+        self.port_number = port_number
+        self.www_root = www_root
+
+        # --- Tornado Server Startup ---
+        self.application = tornado.web.Application([
+            (r"/rpc", RPCHandler),                                                                           # json-rpc
+            (r"/(.*)", FancyStaticFileHandler, {"path": self.www_root, "default_filename": "index.html"}),   # static
+        ])
+
+    def stop(self):
+        tornado.ioloop.IOLoop.instance().add_callback(self._shutdown)
+
+    def run(self):
+        self.application.listen(self.port_number)
+        print "HTTP server listening on port " + str(self.port_number)
+        tornado.ioloop.IOLoop.instance().start()        # blocks here
+
+    def _shutdown(self):
+        tornado.ioloop.IOLoop.instance().stop()
+
+
+# --- Main method ---
+
 if __name__ == '__main__':
-    test_query()
+    server = WebServer(LISTEN_PORT, "www")
+
+    t = threading.Thread(target=server.run)
+    t.start()
+    time.sleep(1)
+
+    while True:
+        try:
+            raw_input("Press Enter to quit.\n")
+            break
+        except KeyboardInterrupt:
+            pass
+
+    server.stop()
+    print "Shutting down..."
+    t.join()
+    print "Shutdown"

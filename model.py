@@ -1,7 +1,8 @@
 
-from sqlalchemy import Column, ForeignKey, Integer, Table, Text
+import sqlalchemy as sa
+from sqlalchemy import Column, ForeignKey, Integer, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql.sqltypes import NullType
+from sqlalchemy.types import DateTime
 from sqlalchemy.ext.declarative import declarative_base
 
 
@@ -46,6 +47,8 @@ class Item(Base):
 
     id = Column(Integer, primary_key=True)
     type = Column(Integer)
+    added = Column(DateTime, server_default=sa.text('CURRENT_TIMESTAMP'))
+    modified = Column(DateTime, server_default=sa.text('CURRENT_TIMESTAMP'), onupdate=sa.func.utc_timestamp())
 
     __mapper_args__ = {
         'polymorphic_identity': MediaType.Item,

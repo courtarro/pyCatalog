@@ -109,8 +109,6 @@ class Amazon(object):
 
     def get_item_imagesets(self, asin):
         response = self.amazon.ItemLookup(ItemId=asin, ResponseGroup='Images')
-        with open('debug.txt', 'w') as debug:
-            debug.write(response)
         res_x = xml_fix.fromstring(response)
         success = res_x.find('Items/Request/IsValid').text == 'True'
         if success:

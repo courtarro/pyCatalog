@@ -5,6 +5,9 @@ import bottlenose
 import xml_fix
 from config import *
 from model import *
+from utils import *
+
+amazon_cache = {}
 
 
 class Amazon(object):
@@ -21,8 +24,28 @@ class Amazon(object):
         res_x = xml_fix.fromstring(response)
         success = res_x.find('Items/Request/IsValid').text == 'True'
         if success:
-            item_x = res_x.find('Items')
-            return item_x.findall('Item')
+            items_x = res_x.findall('Items/Item')
+            items = []
+            for item_x in items_x:
+                asin = item_x.find('ASIN').text
+                amazon_cache[asin] = item_x                       # cache the raw XML object
+
+                item = {'asin': asin}
+                att = item_x.find('ItemAttributes')
+                title = att.find('Title')
+                if title is not None: item['title'] = title.text
+                group = att.find('ProductGroup')
+                if group is not None: item['group'] = group.text
+                actor = att.find('Actor')
+                if actor is not None: item['actor'] = actor.text
+                manufacturer = att.find('Manufacturer')
+                if manufacturer is not None: item['manufacturer'] = manufacturer.text
+                director = att.find('Director')
+                if director is not None: item['director'] = director.text
+                artist = att.find('Artist')
+                if artist is not None: item['artist'] = artist.text
+                items.append(item)
+            return items
         else:
             return None
 
@@ -38,6 +61,12 @@ class Amazon(object):
             return item_x
         else:
             return None
+
+    def lookup_with_cache(self, asin):
+        if amazon_cache.has_key(asin):
+            return amazon_cache[asin]
+        else:
+            return self.lookup(asin)
 
     def to_item(self, amazon_item, upc=None):
         # Convert from Amazon Item to Media Item
@@ -67,14 +96,27 @@ class Amazon(object):
 
         return asin, new_item
 
-    def get_imagesets(self, asin):
+    def add_images_to_item(self, item, asin):
+        covers_a = self.get_item_imagesets(asin)
+        if (covers_a is not None) and len(covers_a):
+            for img_type, cover_a in covers_a.iteritems():
+                url = self.get_best_image_url(cover_a)
+                filename = fetch_image(url)
+                if filename:
+                    img = Image(type=img_type, filename=filename)
+                    item.images.append(img)
+        return
+
+    def get_item_imagesets(self, asin):
         response = self.amazon.ItemLookup(ItemId=asin, ResponseGroup='Images')
+        with open('debug.txt', 'w') as debug:
+            debug.write(response)
         res_x = xml_fix.fromstring(response)
         success = res_x.find('Items/Request/IsValid').text == 'True'
         if success:
             covers_x = {}
             image_x = res_x.find('Items/Item/ImageSets')
-            if len(image_x):
+            if (image_x is not None) and len(image_x):
                 front_x = image_x.find("ImageSet[@Category='primary']")
                 if front_x is not None:
                     covers_x[ImageType.FrontCover] = front_x
@@ -104,3 +146,10 @@ class Amazon(object):
             return None
 
         return max_img
+
+    def get_item_image_url(self, asin):
+        imagesets_x = self.get_item_imagesets(asin)
+        if imagesets_x:
+            return self.get_best_image_url(imagesets_x[ImageType.FrontCover])
+        else:
+            return None

@@ -15,7 +15,7 @@ class MediaType:
     Item, Movie, Music = range(3)
 
 class ExternalIdProvider:
-    NULL, UPC, Amazon, IMDB, CDDB = range(5)
+    NULL, UPC, EAN, ISBN, Amazon, IMDB, CDDB = range(7)
 
 class ImageType:
     NULL, FrontCover, BackCover = range(3)
@@ -24,7 +24,7 @@ class ImageType:
 class ExternalId(Base):
     __tablename__ = 'external_id'
 
-    item_id = Column(ForeignKey('item.id'), primary_key=True)
+    item_id = Column(ForeignKey('item.id', ondelete='CASCADE', onupdate='CASCADE'), primary_key=True)
     provider = Column(Integer, primary_key=True)
     external_id = Column(Text)
 
@@ -34,7 +34,7 @@ class ExternalId(Base):
 class Image(Base):
     __tablename__ = 'image'
 
-    item_id = Column(ForeignKey('item.id'), primary_key=True)
+    item_id = Column(ForeignKey('item.id', ondelete='CASCADE', onupdate='CASCADE'), primary_key=True)
     type = Column(Integer, primary_key=True)
     filename = Column(Text)
 

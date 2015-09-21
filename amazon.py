@@ -21,54 +21,58 @@ class Amazon(object):
 
         # sample keyword (upc): '851147006055'
         response = self.amazon.ItemSearch(Keywords=keywords, SearchIndex='All')
+        with open('debug.txt', 'w') as debug_file:
+            debug_file.write(response)
         res_x = xml_fix.fromstring(response)
         success = res_x.find('Items/Request/IsValid').text == 'True'
         if success:
             items_x = res_x.findall('Items/Item')
             items = []
             for item_x in items_x:
-                asin = item_x.find('ASIN').text
-                amazon_cache[asin] = item_x                       # cache the raw XML object
-
-                item = {'asin': asin}
-                att = item_x.find('ItemAttributes')
-                title = att.find('Title')
-                if title is not None: item['title'] = title.text
-                group = att.find('ProductGroup')
-                if group is not None: item['group'] = group.text
-                actor = att.find('Actor')
-                if actor is not None: item['actor'] = actor.text
-                manufacturer = att.find('Manufacturer')
-                if manufacturer is not None: item['manufacturer'] = manufacturer.text
-                director = att.find('Director')
-                if director is not None: item['director'] = director.text
-                artist = att.find('Artist')
-                if artist is not None: item['artist'] = artist.text
-                items.append(item)
+                items.append(self._xml_to_dict(item_x))
             return items
         else:
             return None
 
-    def lookup(self, asin):
-        # Perform Query by ASIN (assumes only one matching item)
+    def lookup(self, item_id, id_type='ASIN', return_xml=False):
+        # Perform Query by single-item ID (assumes only one matching item, default type is ASIN)
 
         # sample ASIN: 'B00LOWJ6JY'
-        response = self.amazon.ItemLookup(ItemId=asin)
+        print item_id, id_type
+        if id_type == 'ASIN':
+            response = self.amazon.ItemLookup(ItemId=item_id, IdType=id_type)
+        else:
+            response = self.amazon.ItemLookup(ItemId=item_id, IdType=id_type, SearchIndex='All')
+        with open('debug.txt', 'w') as debug_file:
+            debug_file.write(response)
         res_x = xml_fix.fromstring(response)
         success = res_x.find('Items/Request/IsValid').text == 'True'
         if success:
             item_x = res_x.find('Items/Item')
-            return item_x
+            if return_xml:
+                return item_x
+            else:
+                return self._xml_to_dict(item_x)
         else:
             return None
 
-    def lookup_with_cache(self, asin):
+    def lookup_with_cache(self, asin, return_xml=False):
         if amazon_cache.has_key(asin):
-            return amazon_cache[asin]
+            print "Cache hit."
+            if return_xml:
+                return amazon_cache[asin]
+            else:
+                return self._xml_to_dict(amazon_cache[asin])
         else:
-            return self.lookup(asin)
+            print "Cache miss."
+            item_x = self.lookup(asin, 'ASIN', return_xml=True)
+            amazon_cache[asin] = item_x                       # cache the raw XML object
+            if return_xml:
+                return item_x
+            else:
+                return self._xml_to_dict(item_x)
 
-    def to_item(self, amazon_item, upc=None):
+    def to_item(self, amazon_item):
         # Convert from Amazon Item to Media Item
 
         asin = amazon_item.find('ASIN').text
@@ -91,8 +95,6 @@ class Amazon(object):
             print 'Warning: unknown product group: ' + group
 
         new_item.external_ids.append(ExternalId(provider=ExternalIdProvider.Amazon, external_id=asin))
-        if upc is not None:
-            new_item.external_ids.append(ExternalId(provider=ExternalIdProvider.UPC, external_id=upc))
 
         return asin, new_item
 
@@ -151,3 +153,27 @@ class Amazon(object):
             return self.get_best_image_url(imagesets_x[ImageType.FrontCover])
         else:
             return None
+
+    # --- Private methods ---
+    def _xml_to_dict(self, item_x):
+        if item_x is None:
+            return None
+
+        asin = item_x.find('ASIN').text
+
+        item = {'asin': asin}
+        att = item_x.find('ItemAttributes')
+        title = att.find('Title')
+        if title is not None: item['title'] = title.text
+        group = att.find('ProductGroup')
+        if group is not None: item['group'] = group.text
+        actor = att.find('Actor')
+        if actor is not None: item['actor'] = actor.text
+        manufacturer = att.find('Manufacturer')
+        if manufacturer is not None: item['manufacturer'] = manufacturer.text
+        director = att.find('Director')
+        if director is not None: item['director'] = director.text
+        artist = att.find('Artist')
+        if artist is not None: item['artist'] = artist.text
+
+        return item

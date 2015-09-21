@@ -28,12 +28,21 @@ amazon = Amazon()
 
 # --- Methods ---
 
-def write_new_item(new_item):
+def write_new_item(new_item, existing_type=None, existing_id=None):
     engine = sa.create_engine('sqlite:///' + CATALOG_DB)
     Base.metadata.bind = engine
     session_spec = orm.sessionmaker()
     session_spec.bind = engine
     sess = session_spec()
+
+    # Check whether this item exists already
+    if (existing_type is not None) and (existing_id is not None):
+        num = sess.query(Item).join(Item.external_ids) \
+            .filter(ExternalId.provider == existing_type) \
+            .filter(ExternalId.external_id == existing_id).count()
+        if num > 0:
+            sess.close()
+            return "Item already exists."
 
     sess.add(new_item)
     sess.commit()
@@ -41,7 +50,7 @@ def write_new_item(new_item):
 
     sess.close()
 
-    return new_id
+    return None
 
 
 def test_amazon_query():
@@ -79,6 +88,28 @@ def amazon_search(keywords):
 
 
 @dispatcher.add_method
+def amazon_lookup(**kwargs):
+    if kwargs.has_key('asin'):
+        item_id = kwargs['asin']
+        id_type = 'ASIN'
+    elif kwargs.has_key('upc'):
+        item_id = kwargs['upc']
+        if len(item_id) == 12: item_id = '0' + item_id
+        id_type = 'EAN'
+    elif kwargs.has_key('ean'):
+        item_id = kwargs['ean']
+        id_type = 'EAN'
+    elif kwargs.has_key('isbn'):
+        item_id = kwargs['isbn']
+        id_type = 'ISBN'
+    else:
+        return False
+
+    results = amazon.lookup(item_id, id_type)
+    return results or False         # can't return None
+
+
+@dispatcher.add_method
 def amazon_get_image(asin):
     return amazon.get_item_image_url(asin) or False         # can't return None
 
@@ -86,19 +117,30 @@ def amazon_get_image(asin):
 @dispatcher.add_method
 def amazon_add_item(**kwargs):
     asin = kwargs['asin']
-    upc = kwargs['upc'] if kwargs.has_key('upc') else None
 
     # Look up the XML item entry (cached or new)
-    item_x = amazon.lookup_with_cache(asin)
+    item_x = amazon.lookup_with_cache(asin, return_xml=True)
     if item_x is None:
         return False
 
     # Create a model Item object, if possible
-    asin, new_item = amazon.to_item(item_x, upc)
-    amazon.add_images_to_item(new_item, asin)
-    new_id = write_new_item(new_item)
+    asin, new_item = amazon.to_item(item_x)
 
-    return new_id
+    # Add available external IDs
+    if kwargs.has_key('upc'):
+        new_item.external_ids.append(ExternalId(provider=ExternalIdProvider.UPC, external_id=kwargs['upc']))
+    if kwargs.has_key('ean'):
+        new_item.external_ids.append(ExternalId(provider=ExternalIdProvider.EAN, external_id=kwargs['ean']))
+    if kwargs.has_key('isbn'):
+        new_item.external_ids.append(ExternalId(provider=ExternalIdProvider.ISBN, external_id=kwargs['isbn']))
+
+    # Add images from Amazon
+    amazon.add_images_to_item(new_item, asin)
+
+    # Write to the DB
+    result = write_new_item(new_item, ExternalIdProvider.Amazon, asin)      # None = success. String = error message
+
+    return result or False
 
 
 # --- Web server stuff ---

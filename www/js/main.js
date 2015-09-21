@@ -32,7 +32,9 @@ function amazonLookup(source, idType) {
 
     $.post(url, JSON.stringify(request), function (response) {
         result = response.result;
-        handleSearchResponse([result], source.parent());
+        if (result !== false)
+            result = [result];
+        handleSearchResponse(result, source.parent());
     }, 'json');
 }
 
@@ -109,7 +111,11 @@ function updateSelected(itemId, itemDesc) {
 }
 
 function autoSaveIfAppropriate() {
-
+    if (selectedResult === null)
+        return
+    if (!$('#autosave').is(":checked"))
+        return
+    addSelectedToCatalog();
 }
 
 function addSelectedToCatalog() {

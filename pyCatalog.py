@@ -28,50 +28,14 @@ amazon = Amazon()
 
 # --- Methods ---
 
-def write_new_item(new_item, existing_type=None, existing_id=None):
+def get_db_session():
     engine = sa.create_engine('sqlite:///' + CATALOG_DB)
     Base.metadata.bind = engine
     session_spec = orm.sessionmaker()
     session_spec.bind = engine
     sess = session_spec()
 
-    # Check whether this item exists already
-    if (existing_type is not None) and (existing_id is not None):
-        num = sess.query(Item).join(Item.external_ids) \
-            .filter(ExternalId.provider == existing_type) \
-            .filter(ExternalId.external_id == existing_id).count()
-        if num > 0:
-            sess.close()
-            return "Item already exists."
-
-    sess.add(new_item)
-    sess.commit()
-    new_id = new_item.id
-
-    sess.close()
-
-    return None
-
-
-def test_amazon_query():
-    amazon = Amazon()
-
-    upc = '851147006055'
-    items_a = amazon.search(upc)
-    if (items_a is None) or (not len(items_a)):
-        sys.exit("No item with that UPC")
-    item_a = items_a[0]
-    asin, item = amazon.to_item(item_a, upc)
-    covers_a = amazon.get_item_imagesets(asin)
-    if (covers_a is not None) and len(covers_a):
-        for img_type, cover_a in covers_a.iteritems():
-            url = amazon.get_best_image_url(cover_a)
-            filename = fetch_image(url)
-            if filename:
-                img = Image(type=img_type, filename=filename)
-                item.images.append(img)
-
-    write_new_item(item)
+    return sess
 
 
 def rpc_execute(request):
@@ -134,13 +98,25 @@ def amazon_add_item(**kwargs):
     if kwargs.has_key('isbn'):
         new_item.external_ids.append(ExternalId(provider=ExternalIdProvider.ISBN, external_id=kwargs['isbn']))
 
-    # Add images from Amazon
+    # Begin DB access
+    sess = get_db_session()
+
+    # Check whether this item exists already
+    num = sess.query(Item).join(Item.external_ids) \
+        .filter(ExternalId.provider == ExternalIdProvider.Amazon) \
+        .filter(ExternalId.external_id == asin).count()
+    if num > 0:
+        sess.close()
+        return "Item already exists."
+
+    # At this point, we know the item doesn't exist. Get the images of the product.
     amazon.add_images_to_item(new_item, asin)
 
-    # Write to the DB
-    result = write_new_item(new_item, ExternalIdProvider.Amazon, asin)      # None = success. String = error message
+    sess.add(new_item)
+    sess.commit()
+    sess.close()
 
-    return result or False
+    return False
 
 
 # --- Web server stuff ---

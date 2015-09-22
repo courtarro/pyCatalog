@@ -64,6 +64,21 @@ function amazonSearch() {
     }, 'json');
 }
 
+function requestResultImage(asin) {
+    var url = 'rpc';
+    var request = {};
+    request.method = 'amazon_get_image';
+    request.params = [asin];
+    request.id = 1;
+    request.jsonrpc = '2.0';
+
+    $.post(url, JSON.stringify(request), function (response) {
+        result = response.result;
+        if (result !== false)
+            $('#result-image').html('<img src="' + result + '" />')
+    }, 'json');
+}
+
 function handleSearchResponse(results, sourceGroup) {
     if ((results === false) || (results.length <= 0)) {
         sourceGroup.find('span.glyphicon').addClass('glyphicon-remove');
@@ -102,10 +117,18 @@ function updateSelected(itemId, itemDesc) {
         // Find the appropriate result entry
         for (var i = 0; i < searchResults.length; i++) {
             thisResult = searchResults[i];
-            if (thisResult.asin == asin) {
-                $('#selected-result').html(JSON.stringify(searchResults[i]));
-                break;
+            if (thisResult.asin != asin)
+                continue;
+
+            $('#result-image').html('');
+            requestResultImage(asin);
+            newHtml = '<ul>\n';
+            for (var key in searchResults[i]) {
+                newHtml += '\t<li><b>' + key + '</b>: ' + searchResults[i][key] + '</li>\n'
             }
+            newHtml += '</ul>\n';
+            $('#selected-result').html(newHtml);
+            break;
         }
     }
 }

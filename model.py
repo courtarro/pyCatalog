@@ -20,6 +20,12 @@ class ExternalIdProvider:
 class ImageType:
     NULL, FrontCover, BackCover = range(3)
 
+class MusicFormat:
+    NULL, CD, DVDAudio, SACD = range(4)
+
+class MovieFormat:
+    NULL, DVD, Bluray = range(3)
+
 
 class ExternalId(Base):
     __tablename__ = 'external_id'
@@ -63,6 +69,7 @@ class Music(Item):
     title = Column(Text)
     artist = Column(Text)
     label = Column(Text)
+    format = Column(Integer)
 
     __mapper_args__ = {
         'polymorphic_identity': MediaType.Music,
@@ -77,6 +84,7 @@ class Movie(Item):
     actor = Column(Text)
     director = Column(Text)
     publisher = Column(Text)
+    format = Column(Integer)
 
     __mapper_args__ = {
         'polymorphic_identity': MediaType.Movie,

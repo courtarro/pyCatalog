@@ -82,14 +82,28 @@ class Amazon(object):
         if group == 'DVD':
             new_item = Movie()
             new_item.title = item_attr.find('Title').text
-            new_item.director = item_attr.find('Director').text
-            new_item.actor = item_attr.find('Actor').text
-            new_item.publisher = item_attr.find('Manufacturer').text
+            director = item_attr.find('Director')
+            if director is not None:
+                new_item.director = director.text
+
+            actor = item_attr.find('Actor')
+            if actor is not None:
+                new_item.actor = actor.text
+
+            manufacturer = item_attr.find('Manufacturer')
+            if manufacturer is not None:
+                new_item.publisher = manufacturer.text
         elif group == 'Music':
             new_item = Music()
             new_item.title = item_attr.find('Title').text
-            new_item.artist = item_attr.find('Artist').text
-            new_item.label = item_attr.find('Manufacturer').text
+            if item_attr.find('Artist') is not None:
+                new_item.artist = item_attr.find('Artist').text
+            elif item_attr.find("Creator[@Role='Composer']") is not None:
+                new_item.artist = item_attr.find("Creator[@Role='Composer']").text
+
+            manufacturer = item_attr.find('Manufacturer')
+            if manufacturer is not None:
+                new_item.label = manufacturer.text
         else:
             new_item = Item()
             print 'Warning: unknown product group: ' + group
@@ -173,7 +187,14 @@ class Amazon(object):
         if manufacturer is not None: item['manufacturer'] = manufacturer.text
         director = att.find('Director')
         if director is not None: item['director'] = director.text
+
+        # If there's not an artist but there IS a composer, use the composer as the artist
         artist = att.find('Artist')
-        if artist is not None: item['artist'] = artist.text
+        if artist is None:
+            composer = att.find("Creator[@Role='Composer']")
+            if composer is not None:
+                item['artist'] = composer.text
+        else:
+            item['artist'] = artist.text
 
         return item

@@ -29,7 +29,7 @@ You'll also need:
 3. To build the SQL database, run `./build_db.py`. You'll need to edit the script to remove the
    startup warning, which exists so that I don't accidentally run it and delete my database.
 4. Run `./pyCatalog.py`. Observe that there are no startup errors.
-5. Visit http://localhost:8000/new.html to begin adding items.
+5. Visit <http://localhost:8000/new.html> to begin adding items.
 
 ## Adding items
 
